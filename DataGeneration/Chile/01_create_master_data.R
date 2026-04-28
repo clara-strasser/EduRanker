@@ -304,6 +304,56 @@ school_capacity <- capacidad %>%
          vacantes_alta_exigencia_r, vacantes_regular)
 
 
+# Add Region and Province to school_capacity via spatial join on lon/lat
+school_capacity_sf <- school_capacity %>%
+  st_as_sf(
+    coords = c("lon", "lat"),
+    crs = 4326,
+    remove = FALSE,
+    na.fail = FALSE
+  ) %>%
+  st_transform(st_crs(shp))
+
+idx_sc <- st_intersects(school_capacity_sf, shp)
+region_idx_sc <- sapply(idx_sc, function(x) if (length(x) == 0) NA_integer_ else x[1])
+school_capacity_sf$Region <- shp$Region[region_idx_sc]
+
+school_capacity_sf <- school_capacity_sf %>%
+  st_transform(st_crs(shp_province))
+
+idx_sc_prov <- st_intersects(school_capacity_sf, shp_province)
+province_idx_sc <- sapply(idx_sc_prov, function(x) if (length(x) == 0) NA_integer_ else x[1])
+school_capacity_sf$Provincia <- shp_province$Provincia[province_idx_sc]
+
+school_capacity <- school_capacity_sf %>%
+  st_drop_geometry()
+
+# Validate
+# 1) Share of schools with missing region/province (should roughly match share with missing coords)
+mean(is.na(school_capacity$Region))
+ mean(is.na(school_capacity$Provincia))
+ mean(is.na(school_capacity$lon) | is.na(school_capacity$lat))
+
+# 2) Each province should belong to exactly one region
+ school_capacity %>%
+   distinct(Provincia, Region) %>%
+   count(Provincia, name = "n_regions") %>%
+   filter(n_regions > 1)
+
+# 3) Cross-check region from spatial join vs. region derived from matched students
+# (school_capacity_by_region has Region from preferences_applicants_HS)
+# mismatch <- school_capacity %>%
+#   distinct(rbd, Region) %>%
+#   inner_join(school_capacity_by_region %>% distinct(rbd, Region), by = "rbd", suffix = c("_geo", "_students")) %>%
+#   filter(Region_geo != Region_students)
+# nrow(mismatch)  # should be 0 or very small
+
+# 4) Visual: school locations coloured by region
+ ggplot(school_capacity, aes(x = lon, y = lat, color = Region)) +
+   geom_point(alpha = 0.5, size = 0.8) +
+   coord_fixed() +
+   theme_minimal()
+
 # Data 2:
 # Use resultados and count number of students by region admitted to each school (rbd_admitido) and course (cod_curso_admitido)
 # in the data preferences_applicants_HS
@@ -365,12 +415,13 @@ school_capacity <- school_capacity %>%
     priority_student_seats= vacantes_prioritarios,
     high_selectivity_seats_transitional= vacantes_alta_exigencia_t,
     high_selectivity_seats_ranking= vacantes_alta_exigencia_r,
-    regular_seats= vacantes_regular
+    regular_seats= vacantes_regular,
+    province = Provincia
   ) %>%
-  select(rbd, program_code, lat, lon,total_capacity, total_admission_seats,
+  select(rbd, program_code, Region, province, lat, lon, total_capacity, total_admission_seats,
          integration_student_seats, priority_student_seats,
          high_selectivity_seats_transitional, high_selectivity_seats_ranking,
-         regular_seats )
+         regular_seats)
 
 # Save as csv
 
@@ -380,6 +431,7 @@ write_xlsx(final_matching_outcome, "DataGeneration/Chile/outputs/matching_outcom
 write_xlsx(final_matching_outcome_province, "DataGeneration/Chile/outputs/matching_outcome_by_province.xlsx")
 write_xlsx(school_capacity_by_region, "DataGeneration/Chile/outputs/school_capacity_by_region.xlsx")
 write_xlsx(school_capacity, "DataGeneration/Chile/outputs/school_capacity.xlsx")
+write_xlsx(school_capacity, "DataGeneration/Chile/outputs/school_capacity_with_region_and_province.xlsx")
 
 
 
